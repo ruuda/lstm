@@ -1,0 +1,6 @@
+# Editor files
+*.swo
+*.swp
+
+# Sbt build output
+/target/

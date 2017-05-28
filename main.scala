@@ -1,3 +1,27 @@
+// A real number, and its derivative with respect to a number of variables.
+// Or more precisely: f(x_0, x_1, ..., x_i), (df/dx_0)(x_0, x_1, ..., x_i), ...
+case class Dual(x: Double, dxs: Seq[Double]) {
+
+  private def zipWith(that: Dual,
+                      f: (Double, Double) => Double,
+                      g: (Double, Double, Double, Double) => Double): Dual = {
+    val Dual(y, dys) = that
+    require(dxs.length == dys.length)
+    val z = f(x, y)
+    val dzs = dxs.zip(dys).map { case (dx, dy) => g(x, dx, y, dy) }
+    Dual(z, dzs)
+  }
+
+  def +(that: Dual): Dual = this.zipWith(that, _ + _, (_, dx, _, dy) => dx + dy)
+
+  def *(that: Dual): Dual = this.zipWith(that, _ * _, (x, dx, y, dy) => x * dy + y * dx)
+
+  def tanh: Dual = {
+    val tanhx = scala.math.tanh(x)
+    val dtanhx = 1.0 - tanhx * tanhx
+    Dual(tanhx, dxs.map(dx => dx * dtanhx))
+  }
+}
 
 // A vector in a finite-dimensional real vector space.
 // (Not to be confused with scala.collections.immutable.Vector.)

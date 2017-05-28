@@ -23,10 +23,21 @@ case class Dual(x: Double, dxs: Seq[Double]) {
   }
 }
 
+object Dual {
+  def sum(duals: Seq[Dual]): Dual = {
+    if (duals.isEmpty) {
+      Dual(0.0, Seq.empty)
+    } else {
+      val zero = Dual(0.0, duals.head.dxs.map(_ => 0.0))
+      duals.foldLeft(zero) { case (acc, x) => acc + x }
+    }
+  }
+}
+
 // A vector in a finite-dimensional real vector space.
 // (Not to be confused with scala.collections.immutable.Vector.)
-case class Vec(xs: Seq[Double]) {
-  private def zipWith(that: Vec, f: (Double, Double) => Double): Vec = {
+case class Vec(xs: Seq[Dual]) {
+  private def zipWith(that: Vec, f: (Dual, Dual) => Dual): Vec = {
     val Vec(ys) = that
     require(xs.length == ys.length)
     val zs = xs.zip(ys).map { case (x, y) => f(x, y) }
@@ -39,14 +50,14 @@ case class Vec(xs: Seq[Double]) {
 
   def pointwiseMul(that: Vec): Vec = this.zipWith(that, _ * _)
 
-  def dot(that: Vec): Double = (this pointwiseMul that).xs.sum
+  def dot(that: Vec): Dual = Dual.sum((this pointwiseMul that).xs)
 
-  def map(f: Double => Double): Vec = Vec(xs.map(f))
+  def map(f: Dual => Dual): Vec = Vec(xs.map(f))
 
-  def tanh: Vec = this.map(scala.math.tanh)
+  def tanh: Vec = this.map(x => x.tanh)
 }
 
-case class Mat(xss: Seq[Seq[Double]]) {
+case class Mat(xss: Seq[Seq[Dual]]) {
   // Every row must have the same number of columns.
   require(xss.map(_.length).max == xss.map(_.length).min)
 

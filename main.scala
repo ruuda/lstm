@@ -1,3 +1,9 @@
+// Copyright 2017 Ruud van Asseldonk
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License version 3. A copy
+// of the License is available in the root of the repository.
+
 // A real number, and its derivative with respect to a number of variables.
 // Or more precisely: f(x_0, x_1, ..., x_i), (df/dx_0)(x_0, x_1, ..., x_i), ...
 case class Dual(x: Double, dxs: Seq[Double]) {

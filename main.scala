@@ -4,6 +4,8 @@
 // it under the terms of the GNU General Public License version 3. A copy
 // of the License is available in the root of the repository.
 
+import scala.util.Random
+
 // A real number, and its derivative with respect to a number of variables.
 // Or more precisely: f(x_0, x_1, ..., x_i), (df/dx_0)(x_0, x_1, ..., x_i), ...
 case class Dual(x: Double, dxs: Seq[Double]) {
@@ -19,6 +21,7 @@ case class Dual(x: Double, dxs: Seq[Double]) {
   }
 
   def +(that: Dual): Dual = this.zipWith(that, _ + _, (_, dx, _, dy) => dx + dy)
+  def -(that: Dual): Dual = this.zipWith(that, _ - _, (_, dx, _, dy) => dx - dy)
 
   def *(that: Dual): Dual = this.zipWith(that, _ * _, (x, dx, y, dy) => x * dy + y * dx)
 
@@ -38,6 +41,13 @@ object Dual {
       duals.foldLeft(zero) { case (acc, x) => acc + x }
     }
   }
+
+  // Construct a dual number where its derivative with respect to all variables
+  // is 0, except for the one at the given index, for which it is 1.
+  def variable(value: Double, index: Int, total: Int): Dual = {
+    val dxs = Seq.range(0, total).map(i => if (i == index) { 1.0 } else { 0.0 })
+    Dual(value, dxs)
+  }
 }
 
 // A vector in a finite-dimensional real vector space.
@@ -51,6 +61,7 @@ case class Vec(xs: Seq[Dual]) {
   }
 
   def +(that: Vec): Vec = this.zipWith(that, _ + _)
+  def -(that: Vec): Vec = this.zipWith(that, _ - _)
 
   def ++(that: Vec): Vec = Vec(xs ++ that.xs)
 
@@ -75,10 +86,51 @@ case class Mat(xss: Seq[Seq[Dual]]) {
     val zs = xss.map(xs => Vec(xs) dot that)
     Vec(zs)
   }
+
+  def *(that: Dual): Mat = Mat(xss.map(row => row.map(x => x * that)))
+
+  def -(that: Mat): Mat = {
+    val Mat(yss) = that
+    require(xss.length == yss.length)
+    require(xss.zipWithIndex.forall { case (row, i) => row.length == yss(i).length })
+    val zss = xss.zip(yss).map {
+      case (xs, ys) => xs.zip(ys).map { case (x, y) => x - y }
+    }
+    Mat(zss)
+  }
 }
 
 case class Layer(weight: Mat, offset: Vec) {
   def eval(input: Vec): Vec = weight * input + offset
+
+  def -(that: Layer): Layer = Layer(weight - that.weight, offset - that.offset)
+}
+
+object Layer {
+  // Build a layer of the given size with random weights. The weights are
+  // variables for the gradient, starting at the given index.
+  def build(random: Random,
+            inputLen: Int,
+            outputLen: Int,
+            gradientIndex: Int,
+            gradientTotal: Int): Layer = {
+    val rows = Seq.range(0, outputLen).map {
+      i => Seq.range(0, inputLen).map {
+        j =>
+          // Generate a random weight between -1 and 1.
+          val weight = random.nextDouble() * 2.0 - 1.0
+          val index = gradientIndex + i * inputLen + j
+          Dual.variable(weight, index, gradientTotal)
+      }
+    }
+    val offsets = Seq.range(0, outputLen).map {
+      i =>
+        val weight = random.nextDouble() * 2.0 - 1.0
+        val index = gradientIndex + inputLen * outputLen + i
+        Dual.variable(weight, index, gradientTotal)
+    }
+    Layer(Mat(rows), Vec(offsets))
+  }
 }
 
 // An implementation of an LSTM layer based on
@@ -105,6 +157,8 @@ case class Lstm(forgetGate: Layer, inputGate: Layer, candidate: Layer, output: L
 
 object Main {
   def main(args: Array[String]): Unit = {
+    val random = new Random()
+    val layer = Layer.build(random, 5, 3, 0, 18)
     println("Hi")
   }
 }

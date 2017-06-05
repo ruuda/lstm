@@ -42,6 +42,9 @@ object Dual {
     }
   }
 
+  def constant(value: Double, total: Int): Dual =
+    Dual(value, Seq.range(0, total).map(_ => 0.0))
+
   // Construct a dual number where its derivative with respect to all variables
   // is 0, except for the one at the given index, for which it is 1.
   def variable(value: Double, index: Int, total: Int): Dual = {
@@ -63,6 +66,8 @@ case class Vec(xs: Seq[Dual]) {
   def +(that: Vec): Vec = this.zipWith(that, _ + _)
   def -(that: Vec): Vec = this.zipWith(that, _ - _)
 
+  def *(that: Dual): Vec = Vec(xs.map(x => x * that))
+
   def ++(that: Vec): Vec = Vec(xs ++ that.xs)
 
   def pointwiseMul(that: Vec): Vec = this.zipWith(that, _ * _)
@@ -72,6 +77,12 @@ case class Vec(xs: Seq[Dual]) {
   def map(f: Dual => Dual): Vec = Vec(xs.map(f))
 
   def tanh: Vec = this.map(x => x.tanh)
+
+  override def toString: String = "[" ++ xs.map(w => f"${w.x}%5.2f").mkString(", ") ++ "]"
+}
+
+object Vec {
+  def constant(xs: Seq[Double], total: Int): Vec = Vec(xs.map(Dual.constant(_, total)))
 }
 
 case class Mat(xss: Seq[Seq[Dual]]) {
@@ -98,10 +109,16 @@ case class Mat(xss: Seq[Seq[Dual]]) {
     }
     Mat(zss)
   }
+
+  override def toString: String = "[" + xss.map(
+    row => "[" ++ row.map(w => f"${w.x}%5.2f").mkString(", ") ++ "]"
+  ).mkString("\n ") ++ "]"
 }
 
 case class Layer(weight: Mat, offset: Vec) {
   def eval(input: Vec): Vec = weight * input + offset
+
+  def *(that: Dual): Layer = Layer(weight * that, offset * that)
 
   def -(that: Layer): Layer = Layer(weight - that.weight, offset - that.offset)
 }
@@ -128,6 +145,22 @@ object Layer {
         val weight = random.nextDouble() * 2.0 - 1.0
         val index = gradientIndex + inputLen * outputLen + i
         Dual.variable(weight, index, gradientTotal)
+    }
+    Layer(Mat(rows), Vec(offsets))
+  }
+
+  def fromGradient(gradient: Seq[Double],
+                   inputLen: Int,
+                   outputLen: Int,
+                   gradientIndex: Int,
+                   gradientTotal: Int): Layer = {
+    val rows = Seq.range(0, outputLen).map {
+      i => Seq.range(0, inputLen).map {
+        j => Dual.constant(gradient(gradientIndex + i * inputLen + j), gradientTotal)
+      }
+    }
+    val offsets = Seq.range(0, outputLen).map {
+      i => Dual.constant(gradient(gradientIndex + inputLen * outputLen + i), gradientTotal)
     }
     Layer(Mat(rows), Vec(offsets))
   }
@@ -158,7 +191,37 @@ case class Lstm(forgetGate: Layer, inputGate: Layer, candidate: Layer, output: L
 object Main {
   def main(args: Array[String]): Unit = {
     val random = new Random()
-    val layer = Layer.build(random, 5, 3, 0, 18)
-    println("Hi")
+    var layer = Layer.build(random, 5, 3, 0, 18)
+    for (i <- Seq.range(0, 100)) {
+      // Pick a few silly examples that we learn at every iteraiton.
+      val inputs = Seq(
+        Vec.constant(Seq(1.0, 0.0, 0.0, 0.0, 2.0), 18),
+        Vec.constant(Seq(0.0, 1.0, 0.0, 1.0, 0.0), 18),
+        Vec.constant(Seq(0.0, 0.0, 1.0, 0.0, 0.0), 18)
+      )
+
+      val expected = Seq(
+        Vec.constant(Seq(3.0, 3.0, 3.0), 18),
+        Vec.constant(Seq(0.0, 2.0, 2.0), 18),
+        Vec.constant(Seq(0.0, 0.0, 1.0), 18)
+      )
+
+      val actual = inputs.map(layer.eval)
+      val error = Dual.sum(actual.zip(expected).map {
+        case (a, e) =>
+          val diff = a - e
+          diff dot diff
+      })
+
+      println(s"Error in iteration $i: ${error.x}.")
+
+      // Do a gradient descent: we have the gradient of the error with respect
+      // to all the weights, so now update the weights such that the error will
+      // decrease.
+      val correction = Layer.fromGradient(error.dxs, 5, 3, 0, 18)
+      layer = layer - correction * Dual.constant(0.1, 18)
+    }
+
+    println(s"After learning:\nWeight matrix:\n${layer.weight}\nOffset:\n${layer.offset}")
   }
 }

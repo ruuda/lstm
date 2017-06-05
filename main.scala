@@ -193,7 +193,7 @@ object Main {
     val random = new Random()
     var layer = Layer.build(random, 5, 3, 0, 18)
     for (i <- Seq.range(0, 100)) {
-      // Pick a few silly examples that we learn at every iteraiton.
+      // Pick a few silly examples that we learn at every iteration.
       val inputs = Seq(
         Vec.constant(Seq(1.0, 0.0, 0.0, 0.0, 2.0), 18),
         Vec.constant(Seq(0.0, 1.0, 0.0, 1.0, 0.0), 18),
@@ -213,7 +213,7 @@ object Main {
           diff dot diff
       })
 
-      println(s"Error in iteration $i: ${error.x}.")
+      println(s"Error at iteration $i: ${error.x}.")
 
       // Do a gradient descent: we have the gradient of the error with respect
       // to all the weights, so now update the weights such that the error will

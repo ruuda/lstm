@@ -266,11 +266,11 @@ class LetterPredictor {
   }
 
   // Return the letter for which confidence was highest, if the confidence
-  // was more than 0.5, or a space otherwise.
+  // was more than 0.1, or a space otherwise.
   private def vecToLetter(v: Vec): Char = {
     require(v.xs.length == 26)
     val (confidence, i) = v.xs.zipWithIndex.maxBy { case (c, i) => c.x }
-    if (confidence.x > 0.5) {
+    if (confidence.x > 0.1) {
       ('a' + i).toChar
     } else {
       ' '
@@ -310,6 +310,7 @@ class LetterPredictor {
 
     var error = Dual.constant(0.0, glen)
     var prevChar = str.head
+    var prediction = str.substring(0, 1)
 
     // Loop over the remaining letters, and compare the network output with the
     // desired output to determine the error. The desired output after the last
@@ -318,13 +319,14 @@ class LetterPredictor {
       print(c)
       val nextInput = letterToVec(c)
       val diff = output - nextInput
+      prediction += vecToLetter(output)
       error = error + (diff dot diff)
       val (s, o) = lstm.eval(state, output, nextInput)
       state = s
       output = o
     }
 
-    println(s"=> error: ${error.x}.")
+    println(f"[$prediction] => error: ${error.x / str.length}%.3f.")
 
     error
   }
@@ -332,7 +334,7 @@ class LetterPredictor {
   def learnStrings(strs: Array[String], rate: Double): Double = {
     val count = strs.map(_.length).sum
     val error = Dual.sum(strs.map(evalStringError)) * Dual.constant(1.0 / count.toDouble, glen)
-    println(s"Error per letter: ${error.x}")
+    println(f"Error per letter: ${error.x}%.3f")
 
     val correction = Lstm.fromGradient(error.dxs, 26, 26, 0, glen)
     lstm = lstm - correction * Dual.constant(rate, glen)
@@ -344,14 +346,26 @@ class LetterPredictor {
 
 object Main {
   def main(args: Array[String]): Unit = {
+    // A list of words that exists on my machine as part of the cracklib
+    // package, which is a dependency of pam, and thereby of basically
+    // everything.
+    val words = io.Source.fromFile("/usr/share/dict/cracklib-small")
+      .getLines
+      .map(word => word.map(_.toLower).filter(_.isLetter))
+      .toSeq
+    val wordsRandom = new Random().shuffle(words)
+
     println("Constructing LetterPredictor ...")
     val predictor = new LetterPredictor()
     println("Initiating learning process ...")
 
+    // Learn groups of 5 words at a time.
+    val wordGroups = wordsRandom.grouped(5)
+
     var delta = 1.0
     var error = 100.0
-    while (delta > 0.01) {
-      val newError = predictor.learnStrings(Array("foo", "bar", "baz", "fizz"), 1.0)
+    while (delta > 0.001) {
+      val newError = predictor.learnStrings(wordGroups.next().toArray, 1.0)
       delta = (error - newError).abs
       error = newError
     }

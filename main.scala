@@ -246,15 +246,21 @@ object Lstm {
 }
 
 class LetterPredictor {
-  // Use one LSTM cell with 26 inputs (one for every letter) and 26 outputs (1
-  // for every letter).
-  private val glen = Lstm.getGradientLen(26, 26)
+  // Use two LSTM cells, one with 26 inputs (one for every letter) and 15
+  // outputs, and one with 15 inputs and and 26 outputs (1 for every letter).
+  private val glen0 = Lstm.getGradientLen(26, 15)
+  private val glen1 = Lstm.getGradientLen(15, 26)
+  private val glen = glen0 + glen1
   println(s"Variables: $glen.")
-  private var lstm = Lstm.build(new Random(), 26, 26, 0, glen)
+
+  private val random = new Random()
+  private var lstm0 = Lstm.build(random, 26, 15, 0, glen)
+  private var lstm1 = Lstm.build(random, 15, 26, glen0, glen)
 
   // Input used to seed the network. We feed this as initial internal state, but
   // also before the first input character.
-  private val zero = Vec.constant(Array.range(0, 26).map(_ => 0.0), glen)
+  private val zero26 = Vec.constant(Array.range(0, 26).map(_ => 0.0), glen)
+  private val zero15 = Vec.constant(Array.range(0, 15).map(_ => 0.0), glen)
 
   // Convert a lowercase Latin letter to an input or output for the network. The
   // input has 26 values, one for every letter. They are all 0, except for the
@@ -285,11 +291,15 @@ class LetterPredictor {
 
     // Seed the state and previous output, by proding an input of all zeros,
     // with a state and previous output of all zeros too.
-    val seed = lstm.eval(zero, zero, zero)
+    val (istate0, ioutput0) = lstm0.eval(zero15, zero15, zero26)
+    val (istate1, ioutput1) = lstm1.eval(zero26, zero26, ioutput0)
 
     // Feed the string into the network, letter by letter.
-    val (_, finalOutput) = str.foldLeft(seed) {
-      case ((state, output), c) => lstm.eval(state, output, letterToVec(c))
+    val (_, _, _, finalOutput) = str.foldLeft((istate0, ioutput0, istate1, ioutput1)) {
+      case ((state0, output0, state1, output1), c) =>
+        val (newState0, newOutput0) = lstm0.eval(state0, output0, letterToVec(c))
+        val (newState1, newOutput1) = lstm1.eval(state1, output1, newOutput0)
+        (newState0, newOutput0, newState1, newOutput1)
     }
 
     vecToLetter(finalOutput)
@@ -301,12 +311,14 @@ class LetterPredictor {
       "Input must be lowercase letters only.")
 
     print(s"  Evaluating string: ")
+    print(str.head)
 
     // Seed the network with zeros as initial state, previous output, and
     // current input. Then feed in the first letter.
-    val (initialState, initialOutput) = lstm.eval(zero, zero, zero)
-    print(str.head)
-    var (state, output) = lstm.eval(initialState, initialOutput, letterToVec(str.head))
+    val (istate0, ioutput0) = lstm0.eval(zero15, zero15, zero26)
+    val (istate1, ioutput1) = lstm1.eval(zero26, zero26, ioutput0)
+    var (state0, output0) = lstm0.eval(istate0, ioutput0, letterToVec(str.head))
+    var (state1, output1) = lstm1.eval(istate1, ioutput1, output0)
 
     var error = Dual.constant(0.0, glen)
     var prevChar = str.head
@@ -318,12 +330,18 @@ class LetterPredictor {
     for (c <- (str.tail ++ " ")) {
       print(c)
       val nextInput = letterToVec(c)
-      val diff = output - nextInput
-      prediction += vecToLetter(output)
+      val diff = output1 - nextInput
       error = error + (diff dot diff)
-      val (s, o) = lstm.eval(state, output, nextInput)
-      state = s
-      output = o
+      prediction += vecToLetter(output1)
+
+      if (c != ' ') {
+        val (s0, o0) = lstm0.eval(state0, output0, nextInput)
+        val (s1, o1) = lstm1.eval(state1, output1, o0)
+        state0 = s0
+        state1 = s1
+        output0 = o0
+        output1 = o1
+      }
     }
 
     println(f"[$prediction] => error: ${error.x / str.length}%.3f.")
@@ -336,8 +354,10 @@ class LetterPredictor {
     val error = Dual.sum(strs.map(evalStringError)) * Dual.constant(1.0 / count.toDouble, glen)
     println(f"Error per letter: ${error.x}%.3f")
 
-    val correction = Lstm.fromGradient(error.dxs, 26, 26, 0, glen)
-    lstm = lstm - correction * Dual.constant(rate, glen)
+    val correction0 = Lstm.fromGradient(error.dxs, 26, 15, 0, glen)
+    val correction1 = Lstm.fromGradient(error.dxs, 15, 26, glen0, glen)
+    lstm0 = lstm0 - correction0 * Dual.constant(rate, glen)
+    lstm1 = lstm1 - correction1 * Dual.constant(rate, glen)
 
     error.x
   }
@@ -365,7 +385,7 @@ object Main {
     var delta = 1.0
     var error = 100.0
     while (delta > 0.001) {
-      val newError = predictor.learnStrings(wordGroups.next().toArray, 1.0)
+      val newError = predictor.learnStrings(wordGroups.next().toArray, 0.1)
       delta = (error - newError).abs
       error = newError
     }

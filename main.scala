@@ -348,9 +348,12 @@ object Main {
     val predictor = new LetterPredictor()
     println("Initiating learning process ...")
 
-    var error = 1.0
-    while (error > 0.01) {
-      error = predictor.learnStrings(Array("foo", "bar", "baz", "fizz"), 1.0)
+    var delta = 1.0
+    var error = 100.0
+    while (delta > 0.01) {
+      val newError = predictor.learnStrings(Array("foo", "bar", "baz", "fizz"), 1.0)
+      delta = (error - newError).abs
+      error = newError
     }
 
     println(s"Prediction of 'fo_': ${predictor.predict("fo")}.")

@@ -8,7 +8,7 @@ import scala.util.Random
 
 // A real number, and its derivative with respect to a number of variables.
 // Or more precisely: f(x_0, x_1, ..., x_i), (df/dx_0)(x_0, x_1, ..., x_i), ...
-case class Dual(x: Double, dxs: Seq[Double]) {
+case class Dual(x: Double, dxs: Array[Double]) {
 
   private def zipWith(that: Dual,
                       f: (Double, Double) => Double,
@@ -33,9 +33,9 @@ case class Dual(x: Double, dxs: Seq[Double]) {
 }
 
 object Dual {
-  def sum(duals: Seq[Dual]): Dual = {
+  def sum(duals: Array[Dual]): Dual = {
     if (duals.isEmpty) {
-      Dual(0.0, Seq.empty)
+      Dual(0.0, Array.empty)
     } else {
       val zero = Dual(0.0, duals.head.dxs.map(_ => 0.0))
       duals.foldLeft(zero) { case (acc, x) => acc + x }
@@ -43,19 +43,19 @@ object Dual {
   }
 
   def constant(value: Double, total: Int): Dual =
-    Dual(value, Seq.range(0, total).map(_ => 0.0))
+    Dual(value, Array.range(0, total).map(_ => 0.0))
 
   // Construct a dual number where its derivative with respect to all variables
   // is 0, except for the one at the given index, for which it is 1.
   def variable(value: Double, index: Int, total: Int): Dual = {
-    val dxs = Seq.range(0, total).map(i => if (i == index) { 1.0 } else { 0.0 })
+    val dxs = Array.range(0, total).map(i => if (i == index) { 1.0 } else { 0.0 })
     Dual(value, dxs)
   }
 }
 
 // A vector in a finite-dimensional real vector space.
 // (Not to be confused with scala.collections.immutable.Vector.)
-case class Vec(xs: Seq[Dual]) {
+case class Vec(xs: Array[Dual]) {
   private def zipWith(that: Vec, f: (Dual, Dual) => Dual): Vec = {
     val Vec(ys) = that
     require(xs.length == ys.length)
@@ -82,10 +82,10 @@ case class Vec(xs: Seq[Dual]) {
 }
 
 object Vec {
-  def constant(xs: Seq[Double], total: Int): Vec = Vec(xs.map(Dual.constant(_, total)))
+  def constant(xs: Array[Double], total: Int): Vec = Vec(xs.map(Dual.constant(_, total)))
 }
 
-case class Mat(xss: Seq[Seq[Dual]]) {
+case class Mat(xss: Array[Array[Dual]]) {
   // Every row must have the same number of columns.
   require(xss.map(_.length).max == xss.map(_.length).min)
 
@@ -131,8 +131,8 @@ object Layer {
             outputLen: Int,
             gradientIndex: Int,
             gradientTotal: Int): Layer = {
-    val rows = Seq.range(0, outputLen).map {
-      i => Seq.range(0, inputLen).map {
+    val rows = Array.range(0, outputLen).map {
+      i => Array.range(0, inputLen).map {
         j =>
           // Generate a random weight between -1 and 1.
           val weight = random.nextDouble() * 2.0 - 1.0
@@ -140,7 +140,7 @@ object Layer {
           Dual.variable(weight, index, gradientTotal)
       }
     }
-    val offsets = Seq.range(0, outputLen).map {
+    val offsets = Array.range(0, outputLen).map {
       i =>
         val weight = random.nextDouble() * 2.0 - 1.0
         val index = gradientIndex + inputLen * outputLen + i
@@ -149,17 +149,17 @@ object Layer {
     Layer(Mat(rows), Vec(offsets))
   }
 
-  def fromGradient(gradient: Seq[Double],
+  def fromGradient(gradient: Array[Double],
                    inputLen: Int,
                    outputLen: Int,
                    gradientIndex: Int,
                    gradientTotal: Int): Layer = {
-    val rows = Seq.range(0, outputLen).map {
-      i => Seq.range(0, inputLen).map {
+    val rows = Array.range(0, outputLen).map {
+      i => Array.range(0, inputLen).map {
         j => Dual.constant(gradient(gradientIndex + i * inputLen + j), gradientTotal)
       }
     }
-    val offsets = Seq.range(0, outputLen).map {
+    val offsets = Array.range(0, outputLen).map {
       i => Dual.constant(gradient(gradientIndex + inputLen * outputLen + i), gradientTotal)
     }
     Layer(Mat(rows), Vec(offsets))
@@ -222,7 +222,7 @@ object Lstm {
     Lstm(forgetGate, inputGate, candidate, output)
   }
 
-  def fromGradient(gradient: Seq[Double],
+  def fromGradient(gradient: Array[Double],
                    inputLen: Int,
                    outputLen: Int,
                    gradientIndex: Int,
@@ -248,14 +248,14 @@ class LetterPredictor {
 
   // Input used to seed the network. We feed this as initial internal state, but
   // also before the first input character.
-  private val zero = Vec.constant(Seq.range(0, 26).map(_ => 0.0), glen)
+  private val zero = Vec.constant(Array.range(0, 26).map(_ => 0.0), glen)
 
   // Convert a lowercase Latin letter to an input or output for the network. The
   // input has 26 values, one for every letter. They are all 0, except for the
   // one at the letter index, which is 1.
   private def letterToVec(c: Char): Vec = {
     val index = c - 'a'
-    val coords = Seq.range(0, 26).map(i => if (i == index) { 1.0 } else { 0.0 })
+    val coords = Array.range(0, 26).map(i => if (i == index) { 1.0 } else { 0.0 })
     Vec.constant(coords, glen)
   }
 
@@ -323,7 +323,7 @@ class LetterPredictor {
     error
   }
 
-  def learnStrings(strs: Seq[String], rate: Double): Unit = {
+  def learnStrings(strs: Array[String], rate: Double): Unit = {
     val error = Dual.sum(strs.map(evalStringError))
     println(s"Error: ${error.x}")
 
@@ -338,8 +338,8 @@ object Main {
     println("Constructing LetterPredictor ...")
     val predictor = new LetterPredictor()
     println("Initiating learning process ...")
-    for (i <- Seq.range(0, 100)) {
-      predictor.learnStrings(Seq("foo", "bar", "baz", "fizz"), 0.3)
+    for (i <- Array.range(0, 100)) {
+      predictor.learnStrings(Array("foo", "bar", "baz", "fizz"), 0.3)
     }
 
     println(s"Prediction of 'fo_': ${predictor.predict("fo")}.")

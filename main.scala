@@ -239,6 +239,22 @@ object Lstm {
   }
 }
 
+case class LetterPredictor {
+  // Use one LSTM cell with 26 inputs (one for every letter) and 26 outputs (1
+  // for every letter).
+  private val glen = Lstm.getGradientLen(26, 26)
+  private val lstm = Lstm.build(new Random(), 26, 26, 0, glen)
+
+  // Convert a lowercase Latin letter to an input or output for the network. The
+  // input has 26 values, one for every letter. They are all 0, except for the
+  // one at the letter index, which is 1.
+  private def letterToVec(c: Char): Vec = {
+    val index = c - 'a'
+    val coords = Seq.range(0, 26).map(i => if i == index { 1.0 } else { 0.0 })
+    Vec.constant(coords, glen)
+  }
+}
+
 
 object Main {
   def main(args: Array[String]): Unit = {

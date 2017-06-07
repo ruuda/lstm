@@ -239,58 +239,112 @@ object Lstm {
   }
 }
 
-case class LetterPredictor {
+class LetterPredictor {
   // Use one LSTM cell with 26 inputs (one for every letter) and 26 outputs (1
   // for every letter).
   private val glen = Lstm.getGradientLen(26, 26)
-  private val lstm = Lstm.build(new Random(), 26, 26, 0, glen)
+  println(s"Variables: $glen.")
+  private var lstm = Lstm.build(new Random(), 26, 26, 0, glen)
+
+  // Input used to seed the network. We feed this as initial internal state, but
+  // also before the first input character.
+  private val zero = Vec.constant(Seq.range(0, 26).map(_ => 0.0), glen)
 
   // Convert a lowercase Latin letter to an input or output for the network. The
   // input has 26 values, one for every letter. They are all 0, except for the
   // one at the letter index, which is 1.
   private def letterToVec(c: Char): Vec = {
     val index = c - 'a'
-    val coords = Seq.range(0, 26).map(i => if i == index { 1.0 } else { 0.0 })
+    val coords = Seq.range(0, 26).map(i => if (i == index) { 1.0 } else { 0.0 })
     Vec.constant(coords, glen)
+  }
+
+  // Return the letter for which confidence was highest, if the confidence
+  // was more than 0.5, or a space otherwise.
+  private def vecToLetter(v: Vec): Char = {
+    require(v.xs.length == 26)
+    val (confidence, i) = v.xs.zipWithIndex.maxBy { case (c, i) => c.x }
+    if (confidence.x > 0.5) {
+      ('a' + i).toChar
+    } else {
+      ' '
+    }
+  }
+
+  // Feed the entire string into the network, letter by letter, and return
+  // the output of the last iteration converted into a letter.
+  def predict(str: String): Char = {
+    require(str.forall(_.isLetter) && str.forall(_.isLower),
+      "Input must be lowercase letters only.")
+
+    // Seed the state and previous output, by proding an input of all zeros,
+    // with a state and previous output of all zeros too.
+    val seed = lstm.eval(zero, zero, zero)
+
+    // Feed the string into the network, letter by letter.
+    val (_, finalOutput) = str.foldLeft(seed) {
+      case ((state, output), c) => lstm.eval(state, output, letterToVec(c))
+    }
+
+    vecToLetter(finalOutput)
+  }
+
+  // Predict every letter in the string, and sum up all the errors.
+  private def evalStringError(str: String): Dual = {
+    require(str.forall(_.isLetter) && str.forall(_.isLower),
+      "Input must be lowercase letters only.")
+
+    print(s"  Evaluating string: ")
+
+    // Seed the network with zeros as initial state, previous output, and
+    // current input. Then feed in the first letter.
+    val (initialState, initialOutput) = lstm.eval(zero, zero, zero)
+    print(str.head)
+    var (state, output) = lstm.eval(initialState, initialOutput, letterToVec(str.head))
+
+    var error = Dual.constant(0.0, glen)
+    var prevChar = str.head
+
+    // Loop over the remaining letters, and compare the network output with the
+    // desired output to determine the error. The desired output after the last
+    // letter is a space, which encodes as the zero vector as desired output.
+    for (c <- (str.tail ++ " ")) {
+      print(c)
+      val nextInput = letterToVec(c)
+      val diff = output - nextInput
+      error = error + (diff dot diff)
+      val (s, o) = lstm.eval(state, output, nextInput)
+      state = s
+      output = o
+    }
+
+    println(s"=> error: ${error.x}.")
+
+    error
+  }
+
+  def learnStrings(strs: Seq[String], rate: Double): Unit = {
+    val error = Dual.sum(strs.map(evalStringError))
+    println(s"Error: ${error.x}")
+
+    val correction = Lstm.fromGradient(error.dxs, 26, 26, 0, glen)
+    lstm = lstm - correction * Dual.constant(rate, glen)
   }
 }
 
 
 object Main {
   def main(args: Array[String]): Unit = {
-    val random = new Random()
-    val glen = Lstm.getGradientLen(5, 3)
-    var lstm = Lstm.build(random, 5, 3, 0, glen)
+    println("Constructing LetterPredictor ...")
+    val predictor = new LetterPredictor()
+    println("Initiating learning process ...")
     for (i <- Seq.range(0, 100)) {
-      // Pick a few silly examples that we learn at every iteration.
-      val state = Vec.constant(Seq(0.0, 0.0, 0.0), glen)
-
-      val inputs = Seq(
-        Vec.constant(Seq(1.0, 0.0, 0.0, 0.0, 2.0), glen),
-        Vec.constant(Seq(0.0, 1.0, 0.0, 1.0, 0.0), glen),
-        Vec.constant(Seq(0.0, 0.0, 1.0, 0.0, 0.0), glen)
-      )
-
-      val expected = Seq(
-        Vec.constant(Seq(0.3, 0.3, 0.3), glen),
-        Vec.constant(Seq(0.0, 0.2, 0.2), glen),
-        Vec.constant(Seq(0.0, 0.0, 0.1), glen)
-      )
-
-      val actual = inputs.map(input => lstm.eval(state, state, input)._2)
-      val error = Dual.sum(actual.zip(expected).map {
-        case (a, e) =>
-          val diff = a - e
-          diff dot diff
-      })
-
-      println(s"Error at iteration $i: ${error.x}.")
-
-      // Do a gradient descent: we have the gradient of the error with respect
-      // to all the weights, so now update the weights such that the error will
-      // decrease.
-      val correction = Lstm.fromGradient(error.dxs, 5, 3, 0, glen)
-      lstm = lstm - correction * Dual.constant(0.1, glen)
+      predictor.learnStrings(Seq("foo", "bar", "baz", "fizz"), 0.3)
     }
+
+    println(s"Prediction of 'fo_': ${predictor.predict("fo")}.")
+    println(s"Prediction of 'ba_': ${predictor.predict("ba")}.")
+    println(s"Prediction of 'fi_': ${predictor.predict("fi")}.")
+    println(s"Prediction of 'fiz_': ${predictor.predict("fiz")}.")
   }
 }

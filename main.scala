@@ -30,6 +30,12 @@ case class Dual(x: Double, dxs: Array[Double]) {
     val dtanhx = 1.0 - tanhx * tanhx
     Dual(tanhx, dxs.map(dx => dx * dtanhx))
   }
+
+  // Tanh but scaled and translated to fit [0, 1] instead of [-1, 1].
+  def sigmoid: Dual = {
+    val t = this.tanh
+    Dual(t.x * 0.5 + 0.5, t.dxs.map(dx => dx * 0.5))
+  }
 }
 
 object Dual {
@@ -77,6 +83,8 @@ case class Vec(xs: Array[Dual]) {
   def map(f: Dual => Dual): Vec = Vec(xs.map(f))
 
   def tanh: Vec = this.map(x => x.tanh)
+
+  def sigmoid: Vec = this.map(x => x.sigmoid)
 
   override def toString: String = "[" ++ xs.map(w => f"${w.x}%5.2f").mkString(", ") ++ "]"
 }
@@ -174,15 +182,13 @@ case class Lstm(forgetGate: Layer, inputGate: Layer, candidate: Layer, output: L
   def eval(state: Vec, prevOutput: Vec, input: Vec): (Vec, Vec) = {
     val fullInput = prevOutput ++ input
 
-    // TODO: Do I need the tanh here?
-    val forgetMask = forgetGate.eval(fullInput).tanh
-    val updateMask = inputGate.eval(fullInput).tanh
+    val forgetMask = forgetGate.eval(fullInput).sigmoid
+    val updateMask = inputGate.eval(fullInput).sigmoid
     val candidates = candidate.eval(fullInput).tanh
 
     val newState = (state pointwiseMul forgetMask) + (candidates pointwiseMul updateMask)
 
-    // TODO: Do I need the tanh after the output eval?
-    val out = output.eval(fullInput).tanh pointwiseMul newState.tanh
+    val out = output.eval(fullInput).sigmoid pointwiseMul newState.tanh
 
     (newState, out)
   }

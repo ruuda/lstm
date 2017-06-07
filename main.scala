@@ -323,12 +323,15 @@ class LetterPredictor {
     error
   }
 
-  def learnStrings(strs: Array[String], rate: Double): Unit = {
-    val error = Dual.sum(strs.map(evalStringError))
-    println(s"Error: ${error.x}")
+  def learnStrings(strs: Array[String], rate: Double): Double = {
+    val count = strs.map(_.length).sum
+    val error = Dual.sum(strs.map(evalStringError)) * Dual.constant(1.0 / count.toDouble, glen)
+    println(s"Error per letter: ${error.x}")
 
     val correction = Lstm.fromGradient(error.dxs, 26, 26, 0, glen)
     lstm = lstm - correction * Dual.constant(rate, glen)
+
+    error.x
   }
 }
 
@@ -338,8 +341,10 @@ object Main {
     println("Constructing LetterPredictor ...")
     val predictor = new LetterPredictor()
     println("Initiating learning process ...")
-    for (i <- Array.range(0, 10)) {
-      predictor.learnStrings(Array("foo", "bar", "baz", "fizz"), 0.05)
+
+    var error = 1.0
+    while (error > 0.01) {
+      error = predictor.learnStrings(Array("foo", "bar", "baz", "fizz"), 1.0)
     }
 
     println(s"Prediction of 'fo_': ${predictor.predict("fo")}.")

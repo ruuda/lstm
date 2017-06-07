@@ -338,8 +338,8 @@ object Main {
     println("Constructing LetterPredictor ...")
     val predictor = new LetterPredictor()
     println("Initiating learning process ...")
-    for (i <- Array.range(0, 100)) {
-      predictor.learnStrings(Array("foo", "bar", "baz", "fizz"), 0.3)
+    for (i <- Array.range(0, 10)) {
+      predictor.learnStrings(Array("foo", "bar", "baz", "fizz"), 0.05)
     }
 
     println(s"Prediction of 'fo_': ${predictor.predict("fo")}.")

@@ -186,27 +186,82 @@ case class Lstm(forgetGate: Layer, inputGate: Layer, candidate: Layer, output: L
 
     (newState, out)
   }
+
+  def *(that: Dual): Lstm = Lstm(
+    forgetGate * that,
+    inputGate * that,
+    candidate * that,
+    output * that
+  )
+
+  def -(that: Lstm): Lstm = Lstm(
+    forgetGate - that.forgetGate,
+    inputGate - that.inputGate,
+    candidate - that.candidate,
+    output - that.output
+  )
 }
+
+object Lstm {
+  def getGradientLen(inputLen: Int, outputLen: Int): Int =
+    4 * ((inputLen + outputLen) * outputLen + outputLen)
+
+  def build(random: Random,
+            inputLen: Int,
+            outputLen: Int,
+            gradientIndex: Int,
+            gradientTotal: Int): Lstm = {
+    val fullInputLen = outputLen + inputLen;
+    val layerLen = fullInputLen * outputLen + outputLen;
+    require(gradientTotal >= layerLen * 4,
+      s"Need at least ${4 * layerLen} variables for weights, but only $gradientTotal given.")
+    val forgetGate = Layer.build(random, fullInputLen, outputLen, gradientIndex + 0 * layerLen, gradientTotal)
+    val inputGate = Layer.build(random, fullInputLen, outputLen, gradientIndex + 1 * layerLen, gradientTotal)
+    val candidate = Layer.build(random, fullInputLen, outputLen, gradientIndex + 2 * layerLen, gradientTotal)
+    val output = Layer.build(random, fullInputLen, outputLen, gradientIndex + 3 * layerLen, gradientTotal)
+    Lstm(forgetGate, inputGate, candidate, output)
+  }
+
+  def fromGradient(gradient: Seq[Double],
+                   inputLen: Int,
+                   outputLen: Int,
+                   gradientIndex: Int,
+                   gradientTotal: Int): Lstm = {
+    val fullInputLen = inputLen + outputLen;
+    val layerLen = fullInputLen * outputLen + outputLen;
+    require(gradientTotal >= layerLen * 4,
+      s"Need at least ${4 * layerLen} variables for weights, but only $gradientTotal given.")
+    val forgetGate = Layer.fromGradient(gradient, fullInputLen, outputLen, gradientIndex + 0 * layerLen, gradientTotal)
+    val inputGate = Layer.fromGradient(gradient, fullInputLen, outputLen, gradientIndex + 1 * layerLen, gradientTotal)
+    val candidate = Layer.fromGradient(gradient, fullInputLen, outputLen, gradientIndex + 2 * layerLen, gradientTotal)
+    val output = Layer.fromGradient(gradient, fullInputLen, outputLen, gradientIndex + 3 * layerLen, gradientTotal)
+    Lstm(forgetGate, inputGate, candidate, output)
+  }
+}
+
 
 object Main {
   def main(args: Array[String]): Unit = {
     val random = new Random()
-    var layer = Layer.build(random, 5, 3, 0, 18)
+    val glen = Lstm.getGradientLen(5, 3)
+    var lstm = Lstm.build(random, 5, 3, 0, glen)
     for (i <- Seq.range(0, 100)) {
       // Pick a few silly examples that we learn at every iteration.
+      val state = Vec.constant(Seq(0.0, 0.0, 0.0), glen)
+
       val inputs = Seq(
-        Vec.constant(Seq(1.0, 0.0, 0.0, 0.0, 2.0), 18),
-        Vec.constant(Seq(0.0, 1.0, 0.0, 1.0, 0.0), 18),
-        Vec.constant(Seq(0.0, 0.0, 1.0, 0.0, 0.0), 18)
+        Vec.constant(Seq(1.0, 0.0, 0.0, 0.0, 2.0), glen),
+        Vec.constant(Seq(0.0, 1.0, 0.0, 1.0, 0.0), glen),
+        Vec.constant(Seq(0.0, 0.0, 1.0, 0.0, 0.0), glen)
       )
 
       val expected = Seq(
-        Vec.constant(Seq(3.0, 3.0, 3.0), 18),
-        Vec.constant(Seq(0.0, 2.0, 2.0), 18),
-        Vec.constant(Seq(0.0, 0.0, 1.0), 18)
+        Vec.constant(Seq(0.3, 0.3, 0.3), glen),
+        Vec.constant(Seq(0.0, 0.2, 0.2), glen),
+        Vec.constant(Seq(0.0, 0.0, 0.1), glen)
       )
 
-      val actual = inputs.map(layer.eval)
+      val actual = inputs.map(input => lstm.eval(state, state, input)._2)
       val error = Dual.sum(actual.zip(expected).map {
         case (a, e) =>
           val diff = a - e
@@ -218,10 +273,8 @@ object Main {
       // Do a gradient descent: we have the gradient of the error with respect
       // to all the weights, so now update the weights such that the error will
       // decrease.
-      val correction = Layer.fromGradient(error.dxs, 5, 3, 0, 18)
-      layer = layer - correction * Dual.constant(0.1, 18)
+      val correction = Lstm.fromGradient(error.dxs, 5, 3, 0, glen)
+      lstm = lstm - correction * Dual.constant(0.1, glen)
     }
-
-    println(s"After learning:\nWeight matrix:\n${layer.weight}\nOffset:\n${layer.offset}")
   }
 }
